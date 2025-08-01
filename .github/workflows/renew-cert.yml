@@ -1,0 +1,44 @@
+name: SSL Certificate Renewal
+
+on:
+  schedule:
+    # 每月1号凌晨2点执行
+    - cron: '0 2 1 * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  renew-certificate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install acme.sh
+      run: |
+        curl https://get.acme.sh | sh -s email=${{ secrets.CLOUDFLARE_EMAIL }}
+        echo "$HOME/.acme.sh" >> $GITHUB_PATH
+        
+    - name: Set up environment
+      run: |
+        chmod +x ./scripts/get-cert.sh
+        chmod +x ./scripts/upload-to-qiniu.sh
+        
+    - name: Get SSL certificate
+      env:
+        CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+        CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        DOMAIN: ${{ secrets.DOMAIN }}
+      run: ./scripts/get-cert.sh
+      
+    - name: Upload certificate to Qiniu
+      env:
+        QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+        QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+        DOMAIN: ${{ secrets.DOMAIN }}
+      run: ./scripts/upload-to-qiniu.sh
+      
+    - name: Cleanup
+      run: |
+        rm -f /tmp/cert.pem /tmp/key.pem /tmp/fullchain.pem
+        echo "Certificate renewal completed successfully"
