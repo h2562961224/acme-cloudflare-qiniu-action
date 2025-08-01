@@ -29,9 +29,9 @@ if [ $? -eq 0 ]; then
     echo "证书获取成功"
     
     # 复制证书文件到临时目录
-    cp ~/.acme.sh/$DOMAIN/$DOMAIN.cer /tmp/cert.pem
-    cp ~/.acme.sh/$DOMAIN/$DOMAIN.key /tmp/key.pem
-    cp ~/.acme.sh/$DOMAIN/fullchain.cer /tmp/fullchain.pem
+    cp ~/.acme.sh/${DOMAIN}_ecc/$DOMAIN.cer /tmp/cert.pem
+    cp ~/.acme.sh/${DOMAIN}_ecc/$DOMAIN.key /tmp/key.pem
+    cp ~/.acme.sh/${DOMAIN}_ecc/fullchain.cer /tmp/fullchain.pem
     
     echo "证书文件已准备就绪:"
     echo "- 证书: /tmp/cert.pem"
