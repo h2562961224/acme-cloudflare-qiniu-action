@@ -68,7 +68,7 @@ generate_qiniu_token() {
     local encoded_sign=$(echo -n "$sign_str" | openssl dgst -sha1 -hmac "$QINIU_SECRET_KEY" -binary | base64)
     
     # 生成token
-    echo "Qiniu ${QINIU_ACCESS_KEY}:${encoded_sign}"
+    echo "QBox ${QINIU_ACCESS_KEY}:${encoded_sign}"
 }
 
 # 上传证书到七牛云
