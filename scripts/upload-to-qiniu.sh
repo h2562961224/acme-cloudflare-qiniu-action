@@ -36,9 +36,6 @@ fi
 CERT_CONTENT=$(cat /tmp/cert.pem)
 KEY_CONTENT=$(cat /tmp/key.pem)
 
-# 生成时间戳
-TIMESTAMP=$(date +%s)
-
 # 生成证书名称
 CERT_NAME="${DOMAIN}-$(date +%Y%m%d)"
 
@@ -54,39 +51,91 @@ REQUEST_DATA=$(jq -n \
         "pri": $key
     }')
 
-# 生成签名函数
+# 生成七牛云认证Token
+# 基于七牛云官方Node.js SDK的generateAccessTokenV2实现
 generate_qiniu_token() {
     local method="$1"
     local path="$2"
-    local body="$3"
-    local content_type="application/json"
+    local host="$3"
+    local content_type="$4"
+    local body="$5"
     
-    # 构建签名字符串
-    local sign_str="${method} ${path}\nHost: api.qiniu.com\nContent-Type: ${content_type}\n\n${body}"
+    # 方法名转大写
+    local upper_method=$(echo "$method" | tr '[:lower:]' '[:upper:]')
     
-    # 生成签名
-    local encoded_sign=$(echo -n "$sign_str" | openssl dgst -sha1 -hmac "$QINIU_SECRET_KEY" -binary | base64)
+    # 构建签名字符串，完全按照Node.js SDK的逻辑
+    local access="${upper_method} ${path}"
+    access="${access}\nHost: ${host}"
     
-    # 生成token
-    echo "QBox ${QINIU_ACCESS_KEY}:${encoded_sign}"
+    # 添加Content-Type
+    if [ -n "$content_type" ]; then
+        access="${access}\nContent-Type: ${content_type}"
+    else
+        access="${access}\nContent-Type: application/x-www-form-urlencoded"
+    fi
+    
+    # 添加两个换行符
+    access="${access}\n\n"
+    
+    # 添加请求体（仅当不是application/octet-stream时）
+    if [ -n "$body" ] && [ "$content_type" != "application/octet-stream" ]; then
+        access="${access}${body}"
+    fi
+    
+    echo "[DEBUG] 签名字符串长度: ${#access}" >&2
+    echo "[DEBUG] 签名字符串: $(echo "$access" | sed 's/\\n/\\\\n/g')" >&2
+    
+    # 使用printf确保正确处理换行符
+    local signature=$(printf "$access" | openssl dgst -sha1 -hmac "$QINIU_SECRET_KEY" -binary | base64)
+    
+    # URL安全的Base64编码转换 - 只转换+/为-_，保留=
+    local safe_signature=$(echo "$signature" | tr '+/' '-_')
+    
+    # 生成Qiniu格式的token
+    local token="Qiniu ${QINIU_ACCESS_KEY}:${safe_signature}"
+    
+    echo "[DEBUG] 原始签名: $signature" >&2
+    echo "[DEBUG] URL安全签名: $safe_signature" >&2
+    echo "[DEBUG] 生成的Token: $token" >&2
+    
+    echo "$token"
 }
 
 # 上传证书到七牛云
 echo "正在上传证书..."
 
-TOKEN=$(generate_qiniu_token "POST" "/sslcert" "$REQUEST_DATA")
+# 生成上传证书的认证token
+TOKEN=$(generate_qiniu_token "POST" "/sslcert" "api.qiniu.com" "application/json" "$REQUEST_DATA")
 
-RESPONSE=$(curl -s -X POST \
+echo "[DEBUG] 请求数据: $REQUEST_DATA" >&2
+echo "[DEBUG] 使用Token: $TOKEN" >&2
+
+RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST \
     -H "Authorization: $TOKEN" \
     -H "Content-Type: application/json" \
+    -H "Host: api.qiniu.com" \
     -d "$REQUEST_DATA" \
     "https://api.qiniu.com/sslcert")
 
 echo "上传响应: $RESPONSE"
 
+# 提取HTTP状态码
+HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+RESPONSE_BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
+
+echo "HTTP状态码: $HTTP_CODE"
+echo "响应体: $RESPONSE_BODY"
+
+# 检查HTTP状态码
+if [ "$HTTP_CODE" != "200" ]; then
+    echo "证书上传失败，HTTP状态码: $HTTP_CODE"
+    echo "错误信息: $RESPONSE_BODY"
+    exit 1
+fi
+
 # 检查上传结果
-if echo "$RESPONSE" | jq -e '.certID' > /dev/null; then
-    CERT_ID=$(echo "$RESPONSE" | jq -r '.certID')
+if echo "$RESPONSE_BODY" | jq -e '.certID' > /dev/null 2>&1; then
+    CERT_ID=$(echo "$RESPONSE_BODY" | jq -r '.certID')
     echo "证书上传成功，证书ID: $CERT_ID"
     
     # 配置域名使用新证书
@@ -94,31 +143,43 @@ if echo "$RESPONSE" | jq -e '.certID' > /dev/null; then
     
     DOMAIN_CONFIG_DATA=$(jq -n \
         --arg certId "$CERT_ID" \
-        --arg domain "$DOMAIN" \
         '{
             "certId": $certId,
             "forceHttps": true
         }')
     
-    DOMAIN_TOKEN=$(generate_qiniu_token "PUT" "/domain/${DOMAIN}/sslize" "$DOMAIN_CONFIG_DATA")
+    # 生成域名配置的认证token
+    DOMAIN_TOKEN=$(generate_qiniu_token "PUT" "/domain/${DOMAIN}/httpsconf" "api.qiniu.com" "application/json" "$DOMAIN_CONFIG_DATA")
     
-    DOMAIN_RESPONSE=$(curl -s -X PUT \
+    echo "[DEBUG] 域名配置数据: $DOMAIN_CONFIG_DATA" >&2
+    echo "[DEBUG] 域名配置Token: $DOMAIN_TOKEN" >&2
+    
+    DOMAIN_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X PUT \
         -H "Authorization: $DOMAIN_TOKEN" \
         -H "Content-Type: application/json" \
+        -H "Host: api.qiniu.com" \
         -d "$DOMAIN_CONFIG_DATA" \
-        "https://api.qiniu.com/domain/${DOMAIN}/sslize")
+        "https://api.qiniu.com/domain/${DOMAIN}/httpsconf")
     
     echo "域名配置响应: $DOMAIN_RESPONSE"
     
-    if echo "$DOMAIN_RESPONSE" | jq -e '.error' > /dev/null; then
-        echo "域名证书配置失败"
+    # 提取域名配置的HTTP状态码
+    DOMAIN_HTTP_CODE=$(echo "$DOMAIN_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+    DOMAIN_RESPONSE_BODY=$(echo "$DOMAIN_RESPONSE" | sed '/HTTP_CODE:/d')
+    
+    echo "域名配置HTTP状态码: $DOMAIN_HTTP_CODE"
+    echo "域名配置响应体: $DOMAIN_RESPONSE_BODY"
+    
+    if [ "$DOMAIN_HTTP_CODE" != "200" ]; then
+        echo "域名证书配置失败，HTTP状态码: $DOMAIN_HTTP_CODE"
+        echo "错误信息: $DOMAIN_RESPONSE_BODY"
         exit 1
     else
         echo "域名证书配置成功"
     fi
 else
     echo "证书上传失败"
-    echo "错误信息: $RESPONSE"
+    echo "错误信息: $RESPONSE_BODY"
     exit 1
 fi
 

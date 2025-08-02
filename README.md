@@ -132,6 +132,40 @@ MIT License
 
 欢迎提交Issue和Pull Request来改进这个项目。
 
+## 开发笔记
+
+### 七牛云API签名问题
+
+在实现证书上传功能时，花了一天时间调试七牛云的API签名认证。
+
+### 遇到的问题
+
+1. **文档不够清晰**: 七牛云文档中QBox和Qiniu两种签名方式的使用场景说明不明确
+2. **示例不足**: 管理API的签名示例比较少，主要是上传API的示例
+3. **版本差异**: generateAccessToken和generateAccessTokenV2的区别需要看源码才能理解
+4. **实现细节**: 不同语言SDK中签名字符串构造的细节有差异
+
+### 解决方案
+
+最终通过对比Node.js官方SDK源码，找到了正确的签名格式：
+
+```
+METHOD path
+Host: host
+Content-Type: content-type
+
+body
+```
+
+### 建议
+
+如果要使用七牛云管理API：
+1. 参考官方Node.js SDK的`generateAccessTokenV2`实现
+2. 遇到问题时直接看SDK源码比较靠谱
+3. 签名格式要严格按照上面的格式，换行符和空行都不能少
+
+---
+
 ## 支持
 
 如果你在使用过程中遇到问题，可以：
@@ -139,3 +173,4 @@ MIT License
 1. 查看GitHub Actions的执行日志
 2. 检查配置是否正确
 3. 提交Issue描述问题
+4. 如果是七牛云API相关问题，建议直接看源码而不是七牛云文档
