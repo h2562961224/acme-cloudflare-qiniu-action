@@ -44,10 +44,11 @@ REQUEST_DATA=$(jq -n \
     --arg name "$CERT_NAME" \
     --arg cert "$CERT_CONTENT" \
     --arg key "$KEY_CONTENT" \
-    '{"name": $name, "common_name": $ENV.DOMAIN, "cert": $cert, "private_key": $key}')
+    '{"name":$name,"common_name":$ENV.DOMAIN,"cert":$cert,"private_key":$key}')
 
-# 生成七牛云认证Token
+# 修复版本的七牛云认证Token生成函数
 # 基于七牛云官方Node.js SDK的generateAccessTokenV2实现
+# 修复了换行符处理问题
 generate_qiniu_token() {
     local method="$1"
     local path="$2"
@@ -58,30 +59,43 @@ generate_qiniu_token() {
     # 方法名转大写
     local upper_method=$(echo "$method" | tr '[:lower:]' '[:upper:]')
     
-    # 构建签名字符串，完全按照Node.js SDK的逻辑
-    local access="${upper_method} ${path}"
-    access="${access}\nHost: ${host}"
+    # 构建签名字符串 - 使用临时文件确保换行符正确处理
+    local temp_file=$(mktemp)
+    
+    # 写入签名字符串到临时文件，确保换行符正确
+    echo -n "${upper_method} ${path}" > "$temp_file"
+    echo "" >> "$temp_file"  # 添加换行符
+    echo -n "Host: ${host}" >> "$temp_file"
+    echo "" >> "$temp_file"  # 添加换行符
     
     # 添加Content-Type
     if [ -n "$content_type" ]; then
-        access="${access}\nContent-Type: ${content_type}"
+        echo -n "Content-Type: ${content_type}" >> "$temp_file"
     else
-        access="${access}\nContent-Type: application/x-www-form-urlencoded"
+        echo -n "Content-Type: application/x-www-form-urlencoded" >> "$temp_file"
     fi
-    
-    # 添加两个换行符
-    access="${access}\n\n"
+    echo "" >> "$temp_file"  # 添加换行符
+    echo "" >> "$temp_file"  # 添加空行
     
     # 添加请求体（仅当不是application/octet-stream时）
     if [ -n "$body" ] && [ "$content_type" != "application/octet-stream" ]; then
-        access="${access}${body}"
+        echo -n "$body" >> "$temp_file"
     fi
     
-    echo "[DEBUG] 签名字符串长度: ${#access}" >&2
-    echo "[DEBUG] 签名字符串: $(echo "$access" | sed 's/\\n/\\\\n/g')" >&2
+    # 读取文件内容用于调试
+    local access_content=$(cat "$temp_file")
+    local access_length=$(wc -c < "$temp_file")
     
-    # 使用printf确保正确处理换行符
-    local signature=$(printf "$access" | openssl dgst -sha1 -hmac "$QINIU_SECRET_KEY" -binary | base64)
+    echo "[DEBUG] 修复版签名字符串长度: $access_length" >&2
+    echo "[DEBUG] 修复版签名字符串内容:" >&2
+    cat "$temp_file" | sed 's/$/\\n/g' | tr -d '\n' | sed 's/\\n$//' >&2
+    echo "" >&2
+    
+    # 使用文件内容生成签名
+    local signature=$(cat "$temp_file" | openssl dgst -sha1 -hmac "$QINIU_SECRET_KEY" -binary | base64)
+    
+    # 清理临时文件
+    rm -f "$temp_file"
     
     # URL安全的Base64编码转换 - 只转换+/为-_，保留=
     local safe_signature=$(echo "$signature" | tr '+/' '-_')
@@ -89,9 +103,9 @@ generate_qiniu_token() {
     # 生成Qiniu格式的token
     local token="Qiniu ${QINIU_ACCESS_KEY}:${safe_signature}"
     
-    echo "[DEBUG] 原始签名: $signature" >&2
-    echo "[DEBUG] URL安全签名: $safe_signature" >&2
-    echo "[DEBUG] 生成的Token: $token" >&2
+    echo "[DEBUG] 修复版原始签名: $signature" >&2
+    echo "[DEBUG] 修复版URL安全签名: $safe_signature" >&2
+    echo "[DEBUG] 修复版生成的Token: $token" >&2
     
     echo "$token"
 }
@@ -138,7 +152,7 @@ if echo "$RESPONSE_BODY" | jq -e '.certID' > /dev/null 2>&1; then
     
     DOMAIN_CONFIG_DATA=$(jq -n \
         --arg certId "$CERT_ID" \
-        '{"certId": $certId, "forceHttps": true}')
+        '{"certId":$certId,"forceHttps":true}')
     
     # 生成域名配置的认证token
     DOMAIN_TOKEN=$(generate_qiniu_token "PUT" "/domain/${DOMAIN}/httpsconf" "api.qiniu.com" "application/json" "$DOMAIN_CONFIG_DATA")
