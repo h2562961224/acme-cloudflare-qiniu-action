@@ -18,6 +18,9 @@ echo "开始为域名 $DOMAIN 获取SSL证书..."
 export CF_Email="$CLOUDFLARE_EMAIL"
 export CF_Key="$CLOUDFLARE_API_KEY"
 
+# 设置默认CA为Let's Encrypt
+~/.acme.sh --set-default-ca --server letsencrypt
+
 # 使用acme.sh获取证书
 ~/.acme.sh/acme.sh --issue \
     --dns dns_cf \
