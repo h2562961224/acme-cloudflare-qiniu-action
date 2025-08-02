@@ -44,7 +44,7 @@ REQUEST_DATA=$(jq -n \
     --arg name "$CERT_NAME" \
     --arg cert "$CERT_CONTENT" \
     --arg key "$KEY_CONTENT" \
-    '{"name":$name,"common_name":$ENV.DOMAIN,"cert":$cert,"private_key":$key}')
+    '{"name":$name,"common_name":$ENV.DOMAIN,"ca":$cert,"pri":$key}')
 
 # 修复版本的七牛云认证Token生成函数
 # 基于七牛云官方Node.js SDK的generateAccessTokenV2实现
