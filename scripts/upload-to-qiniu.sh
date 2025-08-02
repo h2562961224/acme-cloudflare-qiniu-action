@@ -44,12 +44,7 @@ REQUEST_DATA=$(jq -n \
     --arg name "$CERT_NAME" \
     --arg cert "$CERT_CONTENT" \
     --arg key "$KEY_CONTENT" \
-    '{
-        "name": $name,
-        "common_name": $ENV.DOMAIN,
-        "cert": $cert,
-        "pri": $key
-    }')
+    '{"name": $name, "common_name": $ENV.DOMAIN, "cert": $cert, "private_key": $key}')
 
 # 生成七牛云认证Token
 # 基于七牛云官方Node.js SDK的generateAccessTokenV2实现
@@ -143,10 +138,7 @@ if echo "$RESPONSE_BODY" | jq -e '.certID' > /dev/null 2>&1; then
     
     DOMAIN_CONFIG_DATA=$(jq -n \
         --arg certId "$CERT_ID" \
-        '{
-            "certId": $certId,
-            "forceHttps": true
-        }')
+        '{"certId": $certId, "forceHttps": true}')
     
     # 生成域名配置的认证token
     DOMAIN_TOKEN=$(generate_qiniu_token "PUT" "/domain/${DOMAIN}/httpsconf" "api.qiniu.com" "application/json" "$DOMAIN_CONFIG_DATA")
